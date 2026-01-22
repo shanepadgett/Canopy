@@ -16,27 +16,64 @@ type RenderResult struct {
 	Summary string
 }
 
+// ShortcodeRenderer renders shortcode templates.
+type ShortcodeRenderer interface {
+	RenderShortcode(name string, params map[string]string, inner string, innerIsHTML bool, page *core.Page) (string, error)
+}
+
+// RenderOptions configures Markdown rendering.
+type RenderOptions struct {
+	Page              *core.Page
+	ShortcodeRenderer ShortcodeRenderer
+	SkipPageTOC       bool
+}
+
 // Render converts Markdown to HTML and extracts TOC and summary.
 func Render(markdown string) RenderResult {
+	return RenderWithOptions(markdown, RenderOptions{})
+}
+
+// RenderWithOptions converts Markdown to HTML using custom options.
+func RenderWithOptions(markdown string, opts RenderOptions) RenderResult {
+	if opts.ShortcodeRenderer != nil && opts.Page != nil && !opts.SkipPageTOC {
+		stripped := stripShortcodes(markdown)
+		opts.Page.TOC = collectTOC(stripped)
+	}
+
 	r := &renderer{
-		input: markdown,
+		input:   markdown,
+		options: opts,
 	}
 	return r.render()
 }
 
 type renderer struct {
-	input   string
-	toc     []core.TOCEntry
-	summary string
+	input            string
+	toc              []core.TOCEntry
+	summary          string
+	options          RenderOptions
+	shortcodes       map[string]shortcodeReplacement
+	shortcodeCounter int
 }
 
 func (r *renderer) render() RenderResult {
+	if r.options.ShortcodeRenderer != nil {
+		r.input = r.processShortcodes(r.input)
+	}
+
 	lines := strings.Split(r.input, "\n")
 	var out strings.Builder
 	var i int
 
 	for i < len(lines) {
 		line := lines[i]
+
+		if token, ok := r.blockShortcodeToken(line); ok {
+			out.WriteString(token)
+			out.WriteString("\n")
+			i++
+			continue
+		}
 
 		// Fenced code block
 		if strings.HasPrefix(line, "```") {
@@ -100,7 +137,8 @@ func (r *renderer) render() RenderResult {
 
 		// Extract first paragraph as summary
 		if r.summary == "" {
-			r.summary = extractPlainText(html)
+			summaryHTML := r.replaceShortcodes(html)
+			r.summary = extractPlainText(summaryHTML)
 			if len(r.summary) > 200 {
 				r.summary = r.summary[:200] + "..."
 			}
@@ -109,8 +147,11 @@ func (r *renderer) render() RenderResult {
 		i += consumed
 	}
 
+	html := out.String()
+	html = r.replaceShortcodes(html)
+
 	return RenderResult{
-		HTML:    out.String(),
+		HTML:    html,
 		TOC:     r.toc,
 		Summary: r.summary,
 	}
@@ -384,6 +425,47 @@ func extractPlainText(html string) string {
 	text = strings.ReplaceAll(text, "&quot;", "\"")
 
 	return strings.TrimSpace(text)
+}
+
+func collectTOC(markdown string) []core.TOCEntry {
+	lines := strings.Split(markdown, "\n")
+	var toc []core.TOCEntry
+	var inCode bool
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			inCode = !inCode
+			continue
+		}
+		if inCode || !strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		level := 0
+		for _, c := range line {
+			if c == '#' {
+				level++
+				continue
+			}
+			break
+		}
+		if level > 6 {
+			level = 6
+		}
+
+		text := strings.TrimSpace(line[level:])
+		if text == "" {
+			continue
+		}
+
+		toc = append(toc, core.TOCEntry{
+			Level: level,
+			ID:    slugify(text),
+			Title: text,
+		})
+	}
+
+	return toc
 }
 
 func itoa(i int) string {
