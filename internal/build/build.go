@@ -98,8 +98,17 @@ func Build(opts Options) (*Stats, error) {
 	}
 
 	// Phase 3: Render Markdown
+	templateDir := filepath.Join(rootDir, cfg.TemplateDir)
+	engine, err := template.NewEngine(templateDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading templates: %w", err)
+	}
+
 	for _, page := range site.Pages {
-		result := markdown.Render(page.RawContent)
+		result := markdown.RenderWithOptions(page.RawContent, markdown.RenderOptions{
+			Page:              page,
+			ShortcodeRenderer: engine,
+		})
 		page.Body = result.HTML
 		page.TOC = result.TOC
 		if page.Summary == "" {
@@ -108,11 +117,6 @@ func Build(opts Options) (*Stats, error) {
 	}
 
 	// Phase 4: Template execute
-	templateDir := filepath.Join(rootDir, cfg.TemplateDir)
-	engine, err := template.NewEngine(templateDir)
-	if err != nil {
-		return nil, fmt.Errorf("loading templates: %w", err)
-	}
 
 	// Collect rendered pages: URL -> HTML
 	outputs := make(map[string]string)
