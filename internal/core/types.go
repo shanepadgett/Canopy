@@ -89,6 +89,9 @@ type Config struct {
 	// Build options
 	BuildDrafts bool `json:"buildDrafts"`
 
+	// Search options
+	Search SearchConfig `json:"search"`
+
 	// Permalink styles per section
 	Permalinks map[string]string `json:"permalinks"`
 
@@ -122,6 +125,11 @@ type SectionConfig struct {
 	Permalink string `json:"permalink"`
 }
 
+// SearchConfig defines search behavior.
+type SearchConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
@@ -130,8 +138,11 @@ func DefaultConfig() Config {
 		TemplateDir: "templates",
 		StaticDir:   "static",
 		OutputDir:   "public",
-		Permalinks:  make(map[string]string),
-		Sections:    make(map[string]SectionConfig),
-		Params:      make(map[string]any),
+		Search: SearchConfig{
+			Enabled: true,
+		},
+		Permalinks: make(map[string]string),
+		Sections:   make(map[string]SectionConfig),
+		Params:     make(map[string]any),
 	}
 }

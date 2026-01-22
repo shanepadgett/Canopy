@@ -3,6 +3,7 @@ package build
 
 import (
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"path/filepath"
@@ -202,6 +203,12 @@ func Build(opts Options) (*Stats, error) {
 		return nil, fmt.Errorf("writing rss.xml: %w", err)
 	}
 
+	if cfg.Search.Enabled {
+		if err := writer.WriteFile("search.json", renderSearchIndex(site.Pages)); err != nil {
+			return nil, fmt.Errorf("writing search.json: %w", err)
+		}
+	}
+
 	if err := writer.CopyStatic(staticDir); err != nil {
 		// Static dir may not exist, that's ok
 		if !isNotExist(err) {
@@ -345,6 +352,37 @@ func renderRSS(cfg core.Config, pages []*core.Page) (string, error) {
 	}
 
 	return xmlHeader() + marshalXML(feed), nil
+}
+
+type searchEntry struct {
+	URL     string   `json:"url"`
+	Title   string   `json:"title"`
+	Section string   `json:"section"`
+	Tags    []string `json:"tags"`
+	Summary string   `json:"summary"`
+}
+
+func renderSearchIndex(pages []*core.Page) string {
+	entries := make([]searchEntry, 0, len(pages))
+	for _, page := range pages {
+		summary := strings.TrimSpace(page.Summary)
+		if summary == "" {
+			summary = strings.TrimSpace(page.Description)
+		}
+		entries = append(entries, searchEntry{
+			URL:     page.URL,
+			Title:   page.Title,
+			Section: page.Section,
+			Tags:    page.Tags,
+			Summary: summary,
+		})
+	}
+
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return "[]\n"
+	}
+	return string(data) + "\n"
 }
 
 func xmlHeader() string {

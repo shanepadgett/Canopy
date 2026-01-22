@@ -14,6 +14,7 @@ import (
 // If path is empty, it searches upward from cwd for site.json.
 func Load(path string) (core.Config, error) {
 	cfg := core.DefaultConfig()
+	cfg.Search.Enabled = true
 
 	if path == "" {
 		var err error
