@@ -20,7 +20,8 @@
   "nav": [
     { "title": "Home", "url": "/", "weight": 1 },
     { "title": "Blog", "url": "/blog/", "weight": 2 },
-    { "title": "Guides", "url": "/guides/", "weight": 3 }
+    { "title": "Guides", "url": "/guides/", "weight": 3 },
+    { "title": "Tags", "url": "/tags/", "weight": 4 }
   ],
 
   "sections": {

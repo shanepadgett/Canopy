@@ -2,8 +2,12 @@
 package build
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/shanepadgett/canopy/internal/config"
@@ -131,6 +135,37 @@ func Build(opts Options) (*Stats, error) {
 		outputs[url] = html
 	}
 
+	// Render tag index pages
+	if len(site.Tags) > 0 {
+		var tags []string
+		for tag := range site.Tags {
+			tags = append(tags, tag)
+		}
+		sort.Strings(tags)
+
+		tagPages := make([]*core.Page, 0, len(tags))
+
+		for _, tag := range tags {
+			pages := site.Tags[tag]
+			section := &core.Section{Name: tag, Pages: pages}
+			url := "/tags/" + tag + "/"
+			html, err := engine.RenderList(section, site)
+			if err != nil {
+				return nil, fmt.Errorf("rendering tag %s: %w", tag, err)
+			}
+			outputs[url] = html
+
+			tagPages = append(tagPages, &core.Page{Title: tag, URL: url})
+		}
+
+		tagIndex := &core.Section{Name: "tags", Pages: tagPages}
+		tagIndexHTML, err := engine.RenderList(tagIndex, site)
+		if err != nil {
+			return nil, fmt.Errorf("rendering tags index: %w", err)
+		}
+		outputs["/tags/"] = tagIndexHTML
+	}
+
 	// Render home page
 	homeHTML, err := engine.RenderHome(site)
 	if err != nil {
@@ -153,6 +188,20 @@ func Build(opts Options) (*Stats, error) {
 		}
 	}
 
+	if err := writer.WriteFile("robots.txt", renderRobots(cfg)); err != nil {
+		return nil, fmt.Errorf("writing robots.txt: %w", err)
+	}
+
+	if err := writer.WriteFile("sitemap.xml", renderSitemap(cfg, outputs, site.Pages)); err != nil {
+		return nil, fmt.Errorf("writing sitemap.xml: %w", err)
+	}
+
+	if rss, err := renderRSS(cfg, site.Pages); err != nil {
+		return nil, fmt.Errorf("writing rss.xml: %w", err)
+	} else if err := writer.WriteFile("rss.xml", rss); err != nil {
+		return nil, fmt.Errorf("writing rss.xml: %w", err)
+	}
+
 	if err := writer.CopyStatic(staticDir); err != nil {
 		// Static dir may not exist, that's ok
 		if !isNotExist(err) {
@@ -171,4 +220,143 @@ func Build(opts Options) (*Stats, error) {
 
 func isNotExist(err error) bool {
 	return err != nil && err.Error() == "static directory does not exist"
+}
+
+func renderRobots(cfg core.Config) string {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	return fmt.Sprintf("User-agent: *\nAllow: /\nSitemap: %s/sitemap.xml\n", baseURL)
+}
+
+type sitemapURL struct {
+	Loc     string `xml:"loc"`
+	LastMod string `xml:"lastmod,omitempty"`
+}
+
+type sitemapURLSet struct {
+	XMLName xml.Name     `xml:"urlset"`
+	Xmlns   string       `xml:"xmlns,attr"`
+	URLs    []sitemapURL `xml:"url"`
+}
+
+func renderSitemap(cfg core.Config, outputs map[string]string, pages []*core.Page) string {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	lastMods := make(map[string]string)
+	for _, page := range pages {
+		if !page.Date.IsZero() {
+			lastMods[page.URL] = page.Date.Format("2006-01-02")
+		}
+	}
+
+	urls := make([]sitemapURL, 0, len(outputs))
+	for url := range outputs {
+		entry := sitemapURL{
+			Loc: baseURL + url,
+		}
+		if lastMod, ok := lastMods[url]; ok {
+			entry.LastMod = lastMod
+		}
+		urls = append(urls, entry)
+	}
+
+	sort.Slice(urls, func(i, j int) bool {
+		return urls[i].Loc < urls[j].Loc
+	})
+
+	set := sitemapURLSet{
+		Xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
+		URLs:  urls,
+	}
+
+	return xmlHeader() + marshalXML(set)
+}
+
+type rssFeed struct {
+	XMLName xml.Name `xml:"rss"`
+	Version string   `xml:"version,attr"`
+	Channel rssChannel
+}
+
+type rssChannel struct {
+	Title       string    `xml:"title"`
+	Link        string    `xml:"link"`
+	Description string    `xml:"description"`
+	Language    string    `xml:"language,omitempty"`
+	PubDate     string    `xml:"pubDate,omitempty"`
+	Items       []rssItem `xml:"item"`
+}
+
+type rssItem struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	Guid        string `xml:"guid"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate,omitempty"`
+}
+
+func renderRSS(cfg core.Config, pages []*core.Page) (string, error) {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	var blogPages []*core.Page
+	for _, page := range pages {
+		if page.Section == "blog" {
+			blogPages = append(blogPages, page)
+		}
+	}
+
+	sort.Slice(blogPages, func(i, j int) bool {
+		return blogPages[i].Date.After(blogPages[j].Date)
+	})
+	if len(blogPages) > 20 {
+		blogPages = blogPages[:20]
+	}
+
+	items := make([]rssItem, 0, len(blogPages))
+	for _, page := range blogPages {
+		link := baseURL + page.URL
+		item := rssItem{
+			Title:       page.Title,
+			Link:        link,
+			Guid:        link,
+			Description: page.Description,
+		}
+		if item.Description == "" {
+			item.Description = page.Summary
+		}
+		if !page.Date.IsZero() {
+			item.PubDate = page.Date.Format(time.RFC1123Z)
+		}
+		items = append(items, item)
+	}
+
+	pubDate := ""
+	if len(blogPages) > 0 && !blogPages[0].Date.IsZero() {
+		pubDate = blogPages[0].Date.Format(time.RFC1123Z)
+	}
+
+	feed := rssFeed{
+		Version: "2.0",
+		Channel: rssChannel{
+			Title:       cfg.Title,
+			Link:        baseURL,
+			Description: cfg.Description,
+			Language:    cfg.Language,
+			PubDate:     pubDate,
+			Items:       items,
+		},
+	}
+
+	return xmlHeader() + marshalXML(feed), nil
+}
+
+func xmlHeader() string {
+	return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+}
+
+func marshalXML(v any) string {
+	var buf bytes.Buffer
+	encoder := xml.NewEncoder(&buf)
+	encoder.Indent("", "  ")
+	if err := encoder.Encode(v); err != nil {
+		return ""
+	}
+	return buf.String() + "\n"
 }

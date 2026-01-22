@@ -55,6 +55,25 @@ func (w *Writer) WritePage(url, html string) error {
 	return nil
 }
 
+// WriteFile writes a file relative to the output directory.
+func (w *Writer) WriteFile(relPath, contents string) error {
+	path := strings.TrimPrefix(relPath, "/")
+	if path == "" {
+		return fmt.Errorf("empty output path")
+	}
+
+	filePath := filepath.Join(w.outputDir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", filepath.Dir(filePath), err)
+	}
+
+	if err := os.WriteFile(filePath, []byte(contents), 0o644); err != nil {
+		return fmt.Errorf("writing file %s: %w", filePath, err)
+	}
+
+	return nil
+}
+
 func (w *Writer) urlToPath(url string) string {
 	// Remove leading slash
 	url = strings.TrimPrefix(url, "/")
