@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/shanepadgett/canopy/internal/build"
 	"github.com/shanepadgett/canopy/pkg/cli"
 )
 
@@ -29,8 +30,23 @@ func buildCommand() *cli.Command {
 	output := cmd.Flags.String("output", "o", "", "Output directory (overrides site.json)")
 
 	cmd.Action = func(ctx *cli.Context) error {
-		fmt.Printf("Building site (drafts=%v, output=%q)...\n", *drafts, *output)
-		// TODO: implement build
+		opts := build.Options{
+			BuildDrafts: *drafts,
+			OutputDir:   *output,
+		}
+
+		stats, err := build.Build(opts)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Built site:\n")
+		fmt.Printf("  Pages:    %d\n", stats.Pages)
+		fmt.Printf("  Sections: %d\n", stats.Sections)
+		fmt.Printf("  Tags:     %d\n", stats.Tags)
+		fmt.Printf("  Output:   %s\n", stats.Output)
+		fmt.Printf("  Time:     %s\n", stats.Duration.Round(1e6))
+
 		return nil
 	}
 

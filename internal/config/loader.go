@@ -57,6 +57,11 @@ func Load(path string) (core.Config, error) {
 	return cfg, nil
 }
 
+// Find searches upward from cwd for site.json and returns its path.
+func Find() (string, error) {
+	return findConfig()
+}
+
 // findConfig searches upward from cwd for site.json.
 func findConfig() (string, error) {
 	dir, err := os.Getwd()
